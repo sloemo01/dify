@@ -447,6 +447,7 @@ export type WorkflowRunningData = {
   message_id?: string
   conversation_id?: string
   result: {
+    id?: string
     workflow_id?: string
     inputs?: string
     inputs_truncated: boolean
