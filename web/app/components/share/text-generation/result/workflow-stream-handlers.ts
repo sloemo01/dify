@@ -9,9 +9,9 @@ import type {
 } from '@/types/workflow'
 import { produce } from 'immer'
 import {
-  applyHumanInputFilled,
-  applyHumanInputRequired,
-  applyHumanInputTimeout,
+  updateFilledHumanInputForm,
+  updateHumanInputFormTimeout,
+  updatePendingHumanInputForm,
 } from '@/app/components/base/chat/chat/answer/human-input-content/form-state'
 import { getFilesInLogs } from '@/app/components/base/file-uploader/utils'
 import { NodeRunningStatus, WorkflowRunningStatus } from '@/app/components/workflow/types'
@@ -199,7 +199,7 @@ const updateHumanInputRequired = (
   data: NonNullable<WorkflowProcess['humanInputFormDataList']>[number],
 ) => {
   return updateWorkflowProcess(current, (draft) => {
-    applyHumanInputRequired(draft, data)
+    updatePendingHumanInputForm(draft, data)
 
     const currentIndex = draft.tracing.findIndex((item) => item.node_id === data.node_id)
     if (currentIndex > -1) draft.tracing[currentIndex]!.status = NodeRunningStatus.Paused
@@ -211,7 +211,7 @@ const updateHumanInputFilled = (
   data: NonNullable<WorkflowProcess['humanInputFilledFormDataList']>[number],
 ) => {
   return updateWorkflowProcess(current, (draft) => {
-    applyHumanInputFilled(draft, data)
+    updateFilledHumanInputForm(draft, data)
   })
 }
 
@@ -220,7 +220,7 @@ const updateHumanInputTimeout = (
   data: HumanInputFormTimeoutData,
 ) => {
   return updateWorkflowProcess(current, (draft) => {
-    applyHumanInputTimeout(draft, data)
+    updateHumanInputFormTimeout(draft, data)
   })
 }
 
