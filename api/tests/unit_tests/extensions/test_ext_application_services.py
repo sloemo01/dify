@@ -66,7 +66,7 @@ from services.account_oauth_adapters import (
 from services.app_generate_service import AppGenerateService
 from services.app_preview_query_service import AppPreviewRef, AppPreviewUnavailableError
 from services.app_site_service import AppSiteService
-from services.app_tracing_config_gateway import OpsTraceManagerGateway
+from services.app_tracing_config_gateway import TraceProviderConfigChecks
 from services.app_tracing_config_service import AppTracingConfigService
 from services.auth.data_source_api_key_auth_service import DataSourceApiKeyAuthService
 from services.billing_portal_service import BillingPortalService
@@ -376,7 +376,7 @@ def test_build_application_services_wires_app_tracing_config_boundary(
     assert isinstance(services.app_tracing_configs, AppTracingConfigService)
     assert isinstance(services.app_tracing_configs._configs, SQLAlchemyAppTracingConfigRepository)
     assert services.app_tracing_configs._configs._session_factory is sqlite_session_factory
-    assert isinstance(services.app_tracing_configs._provider, OpsTraceManagerGateway)
+    assert isinstance(services.app_tracing_configs._provider, TraceProviderConfigChecks)
 
 
 def test_build_application_services_wires_workflow_app_log_boundary(
