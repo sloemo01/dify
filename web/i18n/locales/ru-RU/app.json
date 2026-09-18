@@ -120,7 +120,7 @@
   "iconPicker.tryYourLuck": "Испытать удачу",
   "importApp": "Импортировать приложение",
   "importAppDescription": "Пакет приложения или файл DSL",
-  "importAppFormats": "Поддерживаются .ifpkg, .yaml и .yml",
+  "importAppFormats": "Поддерживаются .ifpkg, .zip, .yaml и .yml",
   "importAppUrlPlaceholder": "Вставьте сюда ссылку на пакет приложения (.ifpkg) или файл DSL",
   "importDSL": "Импортировать файл DSL",
   "importFromDSL": "Импортировать из DSL",
