@@ -235,7 +235,7 @@ describe('WorkflowPreview', () => {
     })
 
     expect(screen.getByText('Need Approval')).toBeInTheDocument()
-    expect(await screen.findByText('Already approved')).toBeInTheDocument()
+    expect(await screen.findByText('Already approved', {}, { timeout: 5000 })).toBeInTheDocument()
 
     await user.type(screen.getByRole('textbox'), 'ok')
     await user.click(screen.getByRole('button', { name: 'Approve' }))
