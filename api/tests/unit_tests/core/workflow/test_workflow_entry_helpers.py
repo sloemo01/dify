@@ -11,7 +11,7 @@ from core.credit_usage import CreditUsageAppType
 from core.workflow import workflow_entry
 from core.workflow.system_variables import default_system_variables
 from graphon.engine.filter import ResponseStreamFilter
-from graphon.engine_events import GraphRunFailedEvent, NodeRunSucceededEvent
+from graphon.engine_events import GraphRunAbortedEvent, GraphRunFailedEvent, NodeRunSucceededEvent
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import NodeType, WorkflowNodeExecutionStatus
 from graphon.errors import WorkflowNodeRunFailedError
@@ -23,6 +23,11 @@ from graphon.runtime import VariablePool
 from graphon.variables.variables import StringVariable
 from models.workflow import Workflow
 from tests.unit_tests.config_override import config_overrides_context
+from tests.unit_tests.core.workflow.test_workflow_tool_container import (
+    _outer_graph,
+    _workflow_tool_node,
+    _workflow_tool_source,
+)
 from tests.unit_tests.model_factories import make_workflow
 
 
@@ -85,72 +90,30 @@ class TestWorkflowEntryInit:
                 workflow_tool_source_repository=sentinel.workflow_tool_source_repository,
             )
 
-    def test_applies_execution_and_observability_layers(self):
-        graph_engine = MagicMock()
-        graph_runtime_state = sentinel.runtime_state
-        execution_context_layer = MagicMock()
-        execution_limits_layer = MagicMock()
-        observability_layer = sentinel.observability_layer
-
-        with (
-            config_overrides_context(DEBUG=True, ENABLE_OTEL=False),
-            patch.object(workflow_entry, "is_instrument_flag_enabled", return_value=True),
-            patch.object(workflow_entry, "ExecutionContextLayer", return_value=execution_context_layer),
-            patch.object(workflow_entry, "create_dify_workflow_file_runtime", return_value=sentinel.file_runtime),
-            patch.object(workflow_entry, "Engine", return_value=graph_engine) as graph_engine_cls,
-            patch.object(workflow_entry, "InMemoryChannel", return_value=sentinel.command_channel),
-            patch.object(
-                workflow_entry,
-                "ExecutionLimitsLayer",
-                return_value=execution_limits_layer,
-            ) as execution_limits_layer_cls,
-            patch.object(workflow_entry, "ObservabilityLayer", return_value=observability_layer),
-        ):
+    def test_hidden_workflow_tool_nodes_count_toward_execution_limit(self):
+        tool, _, _ = _workflow_tool_node()
+        repository = MagicMock()
+        repository.get_source.return_value = _workflow_tool_source()
+        with config_overrides_context(WORKFLOW_MAX_EXECUTION_STEPS=2, GRAPH_ENGINE_MAX_WORKERS=1):
             entry = workflow_entry.WorkflowEntry(
-                tenant_id="tenant-id",
-                app_id="app-id",
-                workflow_id="workflow-id-123456",
-                graph_config={"nodes": [], "edges": []},
-                graph=sentinel.graph,
-                user_id="user-id",
+                tenant_id="tenant",
+                app_id="outer-app",
+                workflow_id="outer-workflow",
+                graph_config=tool.init_params.graph_config,
+                graph=_outer_graph(tool),
+                user_id="user",
                 user_from=UserFrom.ACCOUNT,
                 invoke_from=InvokeFrom.DEBUGGER,
                 call_depth=0,
-                variable_pool=sentinel.variable_pool,
-                graph_runtime_state=graph_runtime_state,
-                workflow_tool_source_repository=sentinel.workflow_tool_source_repository,
-                command_channel=None,
+                variable_pool=tool.runtime_state.variable_pool,
+                graph_runtime_state=tool.runtime_state,
+                workflow_tool_source_repository=repository,
             )
+            events = list(entry.run())
 
-        assert entry.command_channel is sentinel.command_channel
-        handler_factories = graph_engine_cls.call_args.kwargs["container_handler_factories"]
-        graph_engine_cls.assert_called_once_with(
-            graph=sentinel.graph,
-            runtime_state=graph_runtime_state,
-            command_channel=sentinel.command_channel,
-            workers=workflow_entry.dify_config.GRAPH_ENGINE_MAX_WORKERS,
-            file_runtime=sentinel.file_runtime,
-            container_handler_factories=handler_factories,
-        )
-        assert len(handler_factories) == 3
-        assert handler_factories[0](MagicMock()).node_type == BuiltinNodeTypes.LOOP
-        assert handler_factories[1](MagicMock()).node_type == BuiltinNodeTypes.ITERATION
-        handler = handler_factories[2](MagicMock())
-        hidden_event = NodeRunSucceededEvent(
-            id="source-execution", node_id="source-node", node_type=BuiltinNodeTypes.START, start_at=datetime.now()
-        )
-        assert handler.should_emit(event=hidden_event) is False
-        execution_limits_layer.on_event.assert_called_once_with(hidden_event)
-        assert handler._execution_context_factory == execution_context_layer.enter_context
-        execution_limits_layer_cls.assert_called_once_with(
-            max_steps=workflow_entry.dify_config.WORKFLOW_MAX_EXECUTION_STEPS,
-            max_time=workflow_entry.dify_config.WORKFLOW_MAX_EXECUTION_TIME,
-        )
-        assert graph_engine.add_layer.call_args_list == [
-            ((execution_context_layer,), {}),
-            ((execution_limits_layer,), {}),
-            ((observability_layer,), {}),
-        ]
+        assert isinstance(events[-1], GraphRunAbortedEvent)
+        assert "Maximum execution steps exceeded: 3 > 2" in events[-1].reason
+        assert not any(isinstance(event, NodeRunSucceededEvent) and event.node_id == "tool" for event in events)
 
     def test_workflow_entry_stores_supplied_response_stream_filter(self, monkeypatch: pytest.MonkeyPatch) -> None:
         supplied_filter = ResponseStreamFilter()

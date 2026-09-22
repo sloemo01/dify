@@ -11,7 +11,6 @@ from core.app.layers.pause_state_persist_layer import (
     _AdvancedChatAppGenerateEntityWrapper,
     _WorkflowGenerateEntityWrapper,
 )
-from graphon.engine.filter import ResponseStreamFilter
 from models.model import AppMode
 
 
@@ -95,8 +94,3 @@ def test_workflow_resumption_context_dumps_loads_roundtrip(state: WorkflowResump
     restored_entity = loaded.get_generate_entity()
     assert isinstance(restored_entity, type(state.generate_entity.entity))
     assert restored_entity.extras["trace_session_id"] == "session-1"
-
-
-def test_get_response_stream_filter_defaults_when_state_missing() -> None:
-    restored = _build_workflow_generate_entity_for_roundtrip().get_response_stream_filter()
-    assert isinstance(restored, ResponseStreamFilter)

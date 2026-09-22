@@ -429,16 +429,14 @@ def test_waiting_form_expiring_during_resume_publishes_timeout_before_success(sq
 
 
 def test_chat_history_keeps_repeated_forms_by_form_id(sqlite_session: Session) -> None:
-    first = _save_form(sqlite_session, status=HumanInputFormStatus.SUBMITTED)
-    second = _save_form(sqlite_session, status=HumanInputFormStatus.SUBMITTED)
     pipeline = _build_pipeline()
     pipeline._workflow_tenant_id = "tenant"
     pipeline._application_generate_entity = MagicMock(task_id="task")
     pipeline._workflow_response_converter = MagicMock()
-    for form in (first, second, first):
+    for form_id in ("first-form", "second-form", "first-form"):
         event = QueueHumanInputFormFilledEvent(
-            form_id=form.id,
-            node_id=form.node_id,
+            form_id=form_id,
+            node_id="same-human-node",
             node_type=BuiltinNodeTypes.HUMAN_INPUT,
             node_title="Approval",
             rendered_content="Decision: approved",
@@ -449,7 +447,7 @@ def test_chat_history_keeps_repeated_forms_by_form_id(sqlite_session: Session) -
 
     contents = sqlite_session.scalars(select(HumanInputContent)).all()
     assert {(content.form_id, content.message_id) for content in contents} == {
-        (first.id, "message-1"),
-        (second.id, "message-1"),
+        ("first-form", "message-1"),
+        ("second-form", "message-1"),
     }
     assert len(contents) == 2

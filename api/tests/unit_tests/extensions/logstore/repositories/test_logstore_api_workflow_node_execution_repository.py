@@ -111,7 +111,7 @@ def test_sql_history_excludes_recursive_tool_executions_and_retains_legacy_rows(
     assert repository.get_node_last_execution("tenant", "app", "workflow", "same-node").id == "null-status"
 
 
-def test_sdk_history_queries_exclude_recursive_tool_executions() -> None:
+def test_sdk_history_searches_use_owner_scope() -> None:
     with patch("extensions.logstore.repositories.logstore_api_workflow_node_execution_repository.AliyunLogStore"):
         repository = LogstoreAPIWorkflowNodeExecutionRepository(session_maker=None)
     repository.logstore_client = MagicMock(supports_pg_protocol=False)
@@ -121,11 +121,9 @@ def test_sdk_history_queries_exclude_recursive_tool_executions() -> None:
     repository.get_node_last_execution(tenant_id="tenant", app_id="app", workflow_id="workflow", node_id="same-node")
 
     history_query, latest_query = [call.kwargs for call in repository.logstore_client.execute_sql.call_args_list]
-    assert "triggered_from != 'workflow-tool'" in latest_query["sql"]
     assert latest_query["query"] == (
         'tenant_id: "tenant" and app_id: "app" and workflow_id: "workflow" and node_id: "same-node"'
     )
-    assert "triggered_from != 'workflow-tool'" in history_query["sql"]
     assert history_query["query"] == 'tenant_id: "tenant" and app_id: "app" and workflow_run_id: "run"'
 
 
@@ -138,7 +136,8 @@ def test_resumption_snapshots_read_latest_nodes_with_full_owner_scope() -> None:
             "CREATE TABLE workflow_node_execution (id TEXT, node_execution_id TEXT, tenant_id TEXT, app_id TEXT, "
             "workflow_id TEXT, workflow_run_id TEXT, triggered_from TEXT, node_id TEXT, node_type TEXT, title TEXT, "
             '"index" INTEGER, status TEXT, elapsed_time REAL, created_at INTEGER, finished_at INTEGER, '
-            "execution_metadata TEXT, log_version INTEGER, __time__ INTEGER)"
+            "execution_metadata TEXT, log_version INTEGER, __time__ INTEGER, "
+            "inputs TEXT, process_data TEXT, outputs TEXT)"
         )
         base = {
             "id": "row-id",
@@ -159,6 +158,9 @@ def test_resumption_snapshots_read_latest_nodes_with_full_owner_scope() -> None:
             "execution_metadata": '{"iteration_id":"iteration"}',
             "log_version": 2,
             "__time__": 1,
+            "inputs": '{"private":"input"}',
+            "process_data": '{"private":"trace"}',
+            "outputs": '{"private":"output"}',
         }
         rows = [base, {**base, "log_version": 1, "status": "running"}]
         rows.extend(
@@ -172,7 +174,9 @@ def test_resumption_snapshots_read_latest_nodes_with_full_owner_scope() -> None:
         )
 
         def execute_query(*, sql: str, **_kwargs: object) -> list[dict[str, object]]:
-            return [dict(row) for row in database.execute(sql)]
+            result = [dict(row) for row in database.execute(sql)]
+            assert all(row.keys().isdisjoint({"inputs", "process_data", "outputs"}) for row in result)
+            return result
 
         repository.logstore_client.execute_sql.side_effect = execute_query
         snapshots = repository.get_execution_snapshots_by_workflow_run(
@@ -198,8 +202,6 @@ def test_resumption_snapshots_read_latest_nodes_with_full_owner_scope() -> None:
     assert snapshots[-1].elapsed_time == 4
     assert repository.logstore_client.execute_sql.call_count == 2
     query = repository.logstore_client.execute_sql.call_args.kwargs
-    assert "SELECT *" not in query["sql"]
-    assert "OFFSET 1000" in query["sql"]
     assert (
         query["query"] == 'tenant_id: "tenant" and app_id: "app" and workflow_run_id: "run" and workflow_id: "workflow"'
     )

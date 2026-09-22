@@ -5,10 +5,10 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import override
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy.orm import Session, sessionmaker
 
 from core.app.apps.execution_coordinator import AppExecutionState
 from core.app.apps.workflow.app_queue_manager import WorkflowAppQueueManager
@@ -35,7 +35,7 @@ from core.app.entities.queue_entities import (
 from core.workflow.nodes.agent.events import NodeRunAgentLogEvent
 from core.workflow.nodes.human_input.pause_reason import HumanInputRequired
 from core.workflow.system_variables import default_system_variables
-from core.workflow.workflow_entry import WorkflowEntry, iter_dify_graph_engine_events
+from core.workflow.workflow_entry import iter_dify_graph_engine_events
 from graphon.engine import Engine
 from graphon.engine.layer import Layer
 from graphon.engine_events import (
@@ -63,7 +63,6 @@ from graphon.node_events import NodeRunResult
 from graphon.runtime import RuntimeState, VariablePool
 from graphon.variables.variables import StringVariable
 from models.workflow import Workflow
-from repositories.workflow_tool_source_repository import SQLAlchemyWorkflowToolSourceRepository
 from services.workflow_run_index import WorkflowRunIndex
 from tests.unit_tests.model_factories import make_workflow
 
@@ -155,7 +154,6 @@ class TestWorkflowBasedAppRunner:
     )
     def test_container_queue_events_preserve_lifecycle_and_ancestor_metadata(
         self,
-        sqlite_session_factory: sessionmaker[Session],
         event_class: type[
             NodeRunIterationStartedEvent
             | NodeRunIterationSucceededEvent
@@ -168,26 +166,7 @@ class TestWorkflowBasedAppRunner:
             task_id="metadata-contract", user_id="account", invoke_from=InvokeFrom.DEBUGGER, app_mode="workflow"
         )
         runner = WorkflowBasedAppRunner(queue_manager=queue, app_id="app")
-        graph_config = {
-            "nodes": [{"id": "start", "data": {"type": "start", "title": "Start"}}],
-            "edges": list[object](),
-        }
-        state = RuntimeState(workflow_id="workflow", variable_pool=VariablePool(), start_at=1)
-        graph = runner._init_graph(graph_config, state, user_from=UserFrom.ACCOUNT, invoke_from=InvokeFrom.DEBUGGER)
-        entry = WorkflowEntry(
-            tenant_id="tenant",
-            app_id="app",
-            workflow_id="workflow",
-            graph_config=graph_config,
-            graph=graph,
-            user_id="account",
-            user_from=UserFrom.ACCOUNT,
-            invoke_from=InvokeFrom.DEBUGGER,
-            call_depth=0,
-            variable_pool=state.variable_pool,
-            graph_runtime_state=state,
-            workflow_tool_source_repository=SQLAlchemyWorkflowToolSourceRepository(sqlite_session_factory),
-        )
+        entry = MagicMock()
         event = event_class(
             id="container-execution",
             node_id="container",

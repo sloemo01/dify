@@ -387,20 +387,18 @@ def test_workflow_run_node_executions_return_frontend_trace_contract(
     )
 
 
-def test_workflow_tool_children_preserve_source_identity(
-    app: Flask, monkeypatch: pytest.MonkeyPatch, sqlite_session: Session
-) -> None:
-    _account(sqlite_session)
-    execution = _workflow_run_node_execution(sqlite_session)
-    execution.app_id = "source-app"
-    execution.workflow_id = "source-workflow"
-    execution.node_execution_id = "source-execution"
+def test_workflow_tool_children_preserve_source_identity(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
     workflow_runs = Mock()
     workflow_runs.get_workflow_tool_node_executions.return_value = [
-        node_execution_response_source(execution, session=sqlite_session)
+        {
+            "id": "child-row",
+            "app_id": "source-app",
+            "workflow_id": "source-workflow",
+            "node_execution_id": "source-execution",
+            "outputs_dict": {"answer": "world"},
+        }
     ]
     _mock_application_services(monkeypatch, workflow_runs)
-    monkeypatch.setattr(db, "session", sqlite_session)
     context = _request_context()
     api = workflow_run_module.WorkflowToolNodeExecutionListApi()
     handler = unwrap(api.get)

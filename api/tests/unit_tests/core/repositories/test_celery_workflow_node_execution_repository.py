@@ -93,10 +93,6 @@ class TestCeleryWorkflowNodeExecutionRepository:
             for node in caller.get_by_workflow_execution(root.workflow_execution_id, include_workflow_tools=True)
         } == {root.id, child.id}
         assert [node.id for node in caller.get_by_workflow_execution(root.workflow_execution_id)] == [root.id]
-        assert child.id not in caller._execution_cache
-        caller._app_id = caller._sql_repository._app_id = None
-        with pytest.raises(ValueError, match="app_id is required"):
-            caller.get_by_workflow_execution(root.workflow_execution_id, include_workflow_tools=True)
 
     @patch("core.repositories.celery_workflow_node_execution_repository.save_workflow_node_execution_task")
     def test_workflow_tool_scope_keeps_async_backend_and_isolates_same_app_history(

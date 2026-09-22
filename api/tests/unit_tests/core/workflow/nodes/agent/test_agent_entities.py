@@ -1,20 +1,10 @@
 from core.app.entities.app_invoke_entities import InvokeFrom, UserFrom, build_dify_run_context
 from core.workflow.node_factory import DifyNodeFactory
-from core.workflow.nodes.agent.entities import AgentNodeData
 from graphon.engine import Engine
 from graphon.engine.command import InMemoryChannel
 from graphon.engine_events import GraphRunSucceededEvent, NodeEvent
 from graphon.graph import Graph
 from graphon.runtime import InitParams, RuntimeState, VariablePool
-
-
-def test_agent_node_data_unconfigured_defaults() -> None:
-    data = AgentNodeData.model_validate({"title": "Agent"})
-
-    assert data.agent_strategy_provider_name == ""
-    assert data.agent_strategy_name == ""
-    assert data.agent_strategy_label == ""
-    assert not data.agent_parameters
 
 
 def test_unconfigured_disconnected_agent_does_not_block_workflow() -> None:

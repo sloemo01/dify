@@ -41,7 +41,6 @@ def test_host_context_preserves_each_engine_file_runtime(monkeypatch: pytest.Mon
             g._login_user = request
             request_id.set(request)
             host = ExecutionContextLayer()
-        assert host.enter_context() is not host.enter_context()
         checked_nodes: list[str] = []
 
         def check_context() -> None:

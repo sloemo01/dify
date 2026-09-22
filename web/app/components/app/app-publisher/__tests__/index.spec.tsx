@@ -1,6 +1,6 @@
 import type { VersionHistory } from '@/types/workflow'
 import { EnvironmentStatus, RuntimeState } from '@dify/contracts/enterprise-app-deploy/types.gen'
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as React from 'react'
 import { WorkflowContext } from '@/app/components/workflow/context'
@@ -40,9 +40,6 @@ let mockPublishedWorkflowQueryState = {
   isSuccess: true,
 }
 
-const sectionProps = vi.hoisted(() => ({
-  summary: null as null | Record<string, any>,
-}))
 const hotkeyMocks = vi.hoisted(() => ({
   hotkeys: [] as string[],
   handlers: [] as Array<(event: { preventDefault: () => void }) => void>,
@@ -75,7 +72,8 @@ const createPublishedWorkflow = (): VersionHistory => ({
   marked_comment: '',
 })
 
-vi.mock('@tanstack/react-hotkeys', () => ({
+vi.mock('@tanstack/react-hotkeys', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tanstack/react-hotkeys')>()),
   useHotkey: (hotkey: string, handler: (event: { preventDefault: () => void }) => void) => {
     hotkeyMocks.hotkeys.push(hotkey)
     hotkeyMocks.handlers.push(handler)
@@ -213,37 +211,12 @@ vi.mock('@/app/components/tools/workflow-tool', () => ({
   ),
 }))
 
-vi.mock('../built-in-publisher/summary-section', () => ({
-  PublisherSummarySection: (props: Record<string, any>) => {
-    sectionProps.summary = props
-    return (
-      <div>
-        {props.environmentTabs}
-        <button
-          type="button"
-          disabled={props.publishDisabled || props.published}
-          onClick={() => void props.handlePublish()}
-        >
-          publisher-summary-publish
-        </button>
-        <button type="button" disabled={props.published} onClick={() => void props.handleRestore()}>
-          publisher-summary-restore
-        </button>
-        <button type="button" onClick={props.onEditVersion}>
-          publisher-summary-edit-version
-        </button>
-      </div>
-    )
-  },
-}))
-
 describe('AppPublisher', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     hotkeyMocks.hotkeys.length = 0
     hotkeyMocks.handlers.length = 0
     collaborationMocks.handler = undefined
-    sectionProps.summary = null
     mockPublishedWorkflow = null
     mockPublishedWorkflowQueryState = {
       isError: false,
@@ -272,11 +245,12 @@ describe('AppPublisher', () => {
   })
 
   it('should enable access permission query when the publish popover opens', async () => {
+    const user = userEvent.setup()
     render(<AppPublisher publishedAt={Date.now()} onToggle={mockOnToggle} />)
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
 
-    expect(screen.getByText('publisher-summary-publish'))!.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /common\.publishUpdate\b/ }))!.toBeInTheDocument()
     expect(mockOnToggle).toHaveBeenCalledWith(true)
 
     await waitFor(() => {
@@ -288,21 +262,14 @@ describe('AppPublisher', () => {
     expect(mockRefetch).not.toHaveBeenCalled()
   })
 
-  it('should not render Web app access control in the publish popover', () => {
-    render(<AppPublisher publishedAt={Date.now()} />)
-
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-
-    expect(screen.queryByText('publisher-access-control')).not.toBeInTheDocument()
-  })
-
   it('should publish once per open session and reset the lock after reopening', async () => {
+    const user = userEvent.setup()
     mockOnPublish.mockResolvedValue(undefined)
 
     render(<AppPublisher publishedAt={Date.now()} onPublish={mockOnPublish} />)
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-    fireEvent.click(screen.getByText('publisher-summary-publish'))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByRole('button', { name: /common\.publishUpdate\b/ }))
 
     await waitFor(() => {
       expect(mockOnPublish).toHaveBeenCalledTimes(1)
@@ -314,16 +281,18 @@ describe('AppPublisher', () => {
           app_name: 'Demo App',
         }),
       )
-      expect(sectionProps.summary?.published).toBe(true)
-      expect(screen.getByText('publisher-summary-publish')).toBeDisabled()
+
+      expect(screen.getByRole('button', { name: /common\.published\b/ })).toBeDisabled()
     })
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-    expect(screen.queryByText('publisher-summary-publish')).not.toBeInTheDocument()
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    expect(
+      screen.queryByRole('button', { name: /common\.publishUpdate\b/ }),
+    ).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-    expect(sectionProps.summary?.published).toBe(false)
-    expect(screen.getByText('publisher-summary-publish')).toBeEnabled()
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+
+    expect(screen.getByRole('button', { name: /common\.publishUpdate\b/ })).toBeEnabled()
   })
 
   it('should refresh deployment data after publishing when multi-environment deployment is available', async () => {
@@ -335,6 +304,7 @@ describe('AppPublisher', () => {
       mode: AppModeEnum.WORKFLOW,
       permission_keys: [AppACLPermission.Deploy],
     }
+    mockPublishedWorkflow = createPublishedWorkflow()
     mockOnPublish.mockResolvedValue(undefined)
     const environmentsQuery =
       consoleQuery.enterprise.appDeploy.deploymentService.listAppEnvironments.queryOptions({
@@ -353,7 +323,7 @@ describe('AppPublisher', () => {
     })
 
     await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-    await user.click(screen.getByText('publisher-summary-publish'))
+    await user.click(screen.getByRole('button', { name: /common\.publishUpdate\b/ }))
 
     const workflowVersionsQuery = appWorkflowVersionsInfiniteQueryOptions('app-1')
     const environmentDeploymentsQuery =
@@ -384,6 +354,7 @@ describe('AppPublisher', () => {
       mode: AppModeEnum.WORKFLOW,
       permission_keys: [],
     }
+    mockPublishedWorkflow = createPublishedWorkflow()
     mockOnPublish.mockResolvedValue(undefined)
 
     renderWithConsoleQuery(<AppPublisher publishedAt={Date.now()} onPublish={mockOnPublish} />, {
@@ -391,7 +362,7 @@ describe('AppPublisher', () => {
     })
 
     await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-    await user.click(screen.getByText('publisher-summary-publish'))
+    await user.click(screen.getByRole('button', { name: /common\.publishUpdate\b/ }))
 
     await waitFor(() => {
       expect(mockOnPublish).toHaveBeenCalledTimes(1)
@@ -415,15 +386,11 @@ describe('AppPublisher', () => {
     render(<AppPublisher publishedAt={Date.now()} />)
 
     await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-    expect(sectionProps.summary).toEqual(
-      expect.objectContaining({
-        isWorkflowApp: true,
-        versionInfo: mockPublishedWorkflow,
-      }),
-    )
-    await user.click(screen.getByText('publisher-summary-edit-version'))
+    await user.click(screen.getByRole('button', { name: /versionHistory\.editVersionInfo\b/ }))
 
-    expect(screen.queryByText('publisher-summary-edit-version')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /versionHistory\.editVersionInfo\b/ }),
+    ).not.toBeInTheDocument()
     const [titleInput, notesInput] = screen.getAllByRole('textbox')
     await user.clear(titleInput!)
     await user.type(titleInput!, 'Release 6')
@@ -456,7 +423,8 @@ describe('AppPublisher', () => {
     expect(mockToastSuccess).toHaveBeenCalled()
   })
 
-  it('should expose app deployment with deploy ACL regardless of the legacy workspace role', () => {
+  it('should expose app deployment with deploy ACL regardless of the legacy workspace role', async () => {
+    const user = userEvent.setup()
     const queryClient = createConsoleQueryClient()
     mockAppDetail = {
       ...mockAppDetail,
@@ -481,7 +449,7 @@ describe('AppPublisher', () => {
       systemFeatures: { webapp_auth: { enabled: true }, enable_app_deploy: false },
     })
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
 
     expect(screen.getByRole('link', { name: /appMenus\.deploy\b/ })).toHaveAttribute(
       'href',
@@ -497,7 +465,8 @@ describe('AppPublisher', () => {
     ).toHaveAttribute('aria-current', 'true')
   })
 
-  it('should keep the workflow publisher single-environment without app deploy ACL', () => {
+  it('should keep the workflow publisher single-environment without app deploy ACL', async () => {
+    const user = userEvent.setup()
     mockAppDetail = {
       ...mockAppDetail,
       mode: AppModeEnum.WORKFLOW,
@@ -509,22 +478,21 @@ describe('AppPublisher', () => {
       systemFeatures: { webapp_auth: { enabled: true }, enable_app_deploy: false },
     })
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
 
     expect(screen.queryByText(/appMenus\.deploy\b/)).not.toBeInTheDocument()
     expect(screen.queryByRole('group', { name: /studio\.environments/ })).not.toBeInTheDocument()
-    expect(sectionProps.summary?.environmentTabs).toBeUndefined()
   })
 
-  it('should keep the single-environment publisher for unsupported app types', () => {
+  it('should keep the single-environment publisher for unsupported app types', async () => {
+    const user = userEvent.setup()
     renderWithConsoleQuery(<AppPublisher publishedAt={Date.now()} />, {
       systemFeatures: { webapp_auth: { enabled: true }, enable_app_deploy: true },
     })
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
 
     expect(screen.queryByRole('group', { name: /studio\.environments/ })).not.toBeInTheDocument()
-    expect(sectionProps.summary?.environmentTabs).toBeUndefined()
   })
 
   it('should show the matching publisher state for an undeployed environment', async () => {
@@ -656,11 +624,13 @@ describe('AppPublisher', () => {
       'overview.chip.latest: Release 5',
     )
     expect(screen.getByRole('button', { name: /studio\.allVersions/ })).toBeInTheDocument()
-    expect(screen.queryByText('publisher-summary-publish')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /common\.publishUpdate\b/ }),
+    ).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /nodes\.common\.memories\.builtIn/ }))
 
-    expect(screen.getByText('publisher-summary-publish')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /common\.publishUpdate\b/ })).toBeInTheDocument()
   })
 
   it('returns to the built-in environment when reopened', async () => {
@@ -773,6 +743,7 @@ describe('AppPublisher', () => {
   })
 
   it('should collect hidden inputs before opening the web app from its config action', async () => {
+    const user = userEvent.setup()
     render(
       <AppPublisher
         publishedAt={Date.now()}
@@ -789,18 +760,16 @@ describe('AppPublisher', () => {
       />,
     )
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
 
-    fireEvent.click(screen.getByRole('button', { name: /operation\.config\b/ }))
+    await user.click(screen.getByRole('button', { name: /operation\.config\b/ }))
 
     expect(
       screen.getByText(/(?:^|\.)overview\.appInfo\.workflowLaunchHiddenInputs\.title(?=$|:)/),
     ).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('Secret'), {
-      target: { value: 'top-secret' },
-    })
-    fireEvent.click(
+    await user.type(screen.getByLabelText('Secret'), 'top-secret')
+    await user.click(
       screen.getByRole('button', { name: /(?:^|\.)overview\.appInfo\.launch(?=$|:)/ }),
     )
 
@@ -812,7 +781,7 @@ describe('AppPublisher', () => {
     })
   })
 
-  it('should keep workflow tool drawer mounted after closing the publish popover', async () => {
+  it('should open the configured workflow tool drawer after closing the publish popover', async () => {
     const user = userEvent.setup()
     mockAppDetail = {
       ...mockAppDetail,
@@ -865,7 +834,7 @@ describe('AppPublisher', () => {
 
       await user.click(screen.getByRole('button', { name: /common\.publish\b/ }))
 
-      expect(screen.getByText('publisher-summary-publish')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /common\.publishUpdate\b/ })).toBeInTheDocument()
       expect(screen.queryByText(/common\.workflowAsTool\b/)).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /common\.configure\b/ })).not.toBeInTheDocument()
     },
@@ -964,15 +933,15 @@ describe('AppPublisher', () => {
     expect(screen.queryByRole('dialog', { name: 'Workflow tool drawer' })).not.toBeInTheDocument()
   })
 
-  it('should ignore the trigger when the publish button is disabled', () => {
+  it('should ignore the trigger when the publish button is disabled', async () => {
+    const user = userEvent.setup()
     render(<AppPublisher disabled publishedAt={Date.now()} onToggle={mockOnToggle} />)
 
-    fireEvent.click(
-      screen.getByText(/(?:^|\.)common\.publish(?=$|:)/).parentElement
-        ?.parentElement as HTMLElement,
-    )
+    await user.click(screen.getByRole('button', { name: /common\.publish\b/ }))
 
-    expect(screen.queryByText('publisher-summary-publish')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /common\.publishUpdate\b/ }),
+    ).not.toBeInTheDocument()
     expect(mockOnToggle).not.toHaveBeenCalled()
   })
 
@@ -1005,6 +974,7 @@ describe('AppPublisher', () => {
   })
 
   it('should keep the popover open when restore and publish fail', async () => {
+    const user = userEvent.setup()
     const preventDefault = vi.fn()
     const onRestore = vi.fn().mockRejectedValue(new Error('restore failed'))
     mockOnPublish.mockRejectedValueOnce(new Error('publish failed'))
@@ -1021,16 +991,17 @@ describe('AppPublisher', () => {
     })
     expect(mockTrackEvent).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-    fireEvent.click(screen.getByText('publisher-summary-restore'))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByRole('button', { name: /common\.restore\b/ }))
 
     await waitFor(() => {
       expect(onRestore).toHaveBeenCalledTimes(1)
     })
-    expect(screen.getByText('publisher-summary-publish'))!.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /common\.publishUpdate\b/ }))!.toBeInTheDocument()
   })
 
   it('should show marketplace button and open redirect URL on success', async () => {
+    const user = userEvent.setup()
     mockPublishToCreatorsPlatform.mockResolvedValue({
       redirect_url: 'https://marketplace.example.com/publish?code=abc',
     })
@@ -1040,9 +1011,9 @@ describe('AppPublisher', () => {
       systemFeatures: { webapp_auth: { enabled: true }, enable_creators_platform: true },
     })
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
     expect(screen.getByRole('button', { name: /common\.publishToMarketplace\b/ })).toBeEnabled()
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publishToMarketplace(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publishToMarketplace(?=$|:)/))
 
     await waitFor(() => {
       expect(mockPublishToCreatorsPlatform).toHaveBeenCalledWith({ appID: 'app-1' })
@@ -1056,14 +1027,15 @@ describe('AppPublisher', () => {
   })
 
   it('should show toast error when publish to marketplace fails', async () => {
+    const user = userEvent.setup()
     mockPublishToCreatorsPlatform.mockRejectedValue(new Error('network error'))
 
     renderWithConsoleQuery(<AppPublisher publishedAt={Date.now()} onPublish={mockOnPublish} />, {
       systemFeatures: { webapp_auth: { enabled: true }, enable_creators_platform: true },
     })
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publishToMarketplace(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publishToMarketplace(?=$|:)/))
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(
@@ -1072,42 +1044,28 @@ describe('AppPublisher', () => {
     })
   })
 
-  it('should disable marketplace button when not yet published', () => {
+  it('should disable marketplace button when not yet published', async () => {
+    const user = userEvent.setup()
     renderWithConsoleQuery(<AppPublisher onPublish={mockOnPublish} />, {
       systemFeatures: { webapp_auth: { enabled: true }, enable_creators_platform: true },
     })
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
     const marketplaceButton = screen.getByRole('button', { name: /common\.publishToMarketplace\b/ })
     expect(marketplaceButton).toBeDisabled()
     // clicking should not call the API because publishedAt is undefined
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publishToMarketplace(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publishToMarketplace(?=$|:)/))
     expect(mockPublishToCreatorsPlatform).not.toHaveBeenCalled()
   })
 
-  it('should hide marketplace button when enable_creators_platform is false', () => {
+  it('should hide marketplace button when enable_creators_platform is false', async () => {
+    const user = userEvent.setup()
     render(<AppPublisher publishedAt={Date.now()} onPublish={mockOnPublish} />)
 
-    fireEvent.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
+    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
     expect(
       screen.queryByText(/(?:^|\.)common\.publishToMarketplace(?=$|:)/),
     ).not.toBeInTheDocument()
-  })
-
-  it('should not infer an app mode when app detail is unavailable', async () => {
-    const user = userEvent.setup()
-    mockAppDetail = null
-
-    render(<AppPublisher publishedAt={Date.now()} />)
-
-    await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-
-    expect(sectionProps.summary).toEqual(
-      expect.objectContaining({
-        isChatApp: false,
-        isWorkflowApp: false,
-      }),
-    )
   })
 
   it('should keep workflow publishing available for an existing published version', async () => {
@@ -1131,13 +1089,7 @@ describe('AppPublisher', () => {
     )
 
     await user.click(screen.getByText(/(?:^|\.)common\.publish(?=$|:)/))
-    expect(sectionProps.summary).toEqual(
-      expect.objectContaining({
-        published: false,
-        publishedAt: 1_710_000_100_000,
-      }),
-    )
-    await user.click(screen.getByText('publisher-summary-publish'))
+    await user.click(screen.getByRole('button', { name: /common\.publishUpdate\b/ }))
     await waitFor(() => expect(mockOnPublish).toHaveBeenCalledOnce())
   })
 

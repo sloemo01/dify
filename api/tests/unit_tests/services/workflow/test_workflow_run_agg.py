@@ -1,12 +1,11 @@
 """Workflow orchestration against real Engine, SQLAlchemy, and filesystem storage."""
 
 import json
-from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from celery import Celery
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -141,15 +140,11 @@ def test_driver_publishes_persisted_start_index_and_success(sqlite_engine: Engin
 
 
 @pytest.fixture
-def _local_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _local_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(storage, "storage_runner", OpenDALStorage(scheme="fs", root=str(tmp_path)), raising=False)
     from core.app.apps import workflow_app_runner
 
-    # Bind the real notification task to Celery's memory transport, without a broker server.
-    with Celery("workflow-pause-tests", broker="memory://", set_as_current=False) as task_app:
-        task = task_app.tasks[workflow_app_runner.dispatch_human_input_email_task.name]
-        monkeypatch.setattr(workflow_app_runner, "dispatch_human_input_email_task", task)
-        yield
+    monkeypatch.setattr(workflow_app_runner, "dispatch_human_input_email_task", MagicMock())
 
 
 @pytest.mark.usefixtures("_local_storage")
@@ -185,12 +180,13 @@ def test_pause_publication_persists_summary_and_optional_snapshot(
 
 
 @pytest.mark.usefixtures("_local_storage")
-def test_pause_database_failure_publishes_failure_instead_of_resume_ready(sqlite_engine: Engine) -> None:
-    with sqlite_engine.begin() as connection:
-        connection.exec_driver_sql(
-            "CREATE TRIGGER reject_pause BEFORE INSERT ON workflow_pauses "
-            "BEGIN SELECT RAISE(ABORT, 'pause-write-failed'); END"
-        )
+def test_pause_database_failure_publishes_failure_instead_of_resume_ready(
+    sqlite_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "repositories.sqlalchemy_api_workflow_run_repository.DifyAPISQLAlchemyWorkflowRunRepository.create_workflow_pause",
+        MagicMock(side_effect=RuntimeError("pause-write-failed")),
+    )
     runner = make_workflow_runner(sqlite_engine, human_input=True)
     WorkflowRunAgg.run(runner, PauseStateLayerConfig(sqlite_engine, runner.application_generate_entity.user_id))
     events = [message.event for message in runner._queue_manager.listen()]

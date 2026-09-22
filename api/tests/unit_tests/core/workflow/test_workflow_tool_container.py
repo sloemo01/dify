@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from functools import partial
 from types import SimpleNamespace
-from typing import cast, override
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,7 +15,7 @@ from core.helper.code_executor.code_executor import CodeExecutionError
 from core.repositories.human_input_repository import (
     FormCreateParams,
     HumanInputFormEntity,
-    HumanInputFormRecipientEntity,
+    HumanInputFormRepository,
 )
 from core.tools.workflow_as_tool.repository import WorkflowToolSource, WorkflowToolSourceRepository
 from core.workflow.node_factory import DifyNodeFactory
@@ -407,83 +407,6 @@ def _human_input_workflow_tool_source() -> WorkflowToolSource:
     return replace(_workflow_tool_source(), graph_config=source_graph)
 
 
-class _TestForm(HumanInputFormEntity):
-    def __init__(self, form_id: str) -> None:
-        self.form_id = form_id
-        self.is_submitted = False
-
-    @property
-    @override
-    def id(self) -> str:
-        return self.form_id
-
-    @property
-    @override
-    def submission_token(self) -> str | None:
-        return "submission-token"
-
-    @property
-    @override
-    def recipients(self) -> list[HumanInputFormRecipientEntity]:
-        return []
-
-    @property
-    @override
-    def rendered_content(self) -> str:
-        return "Approve this run?"
-
-    @property
-    @override
-    def selected_action_id(self) -> str | None:
-        return "approve" if self.is_submitted else None
-
-    @property
-    @override
-    def created_at(self) -> datetime:
-        return datetime.now(UTC).replace(tzinfo=None)
-
-    @property
-    @override
-    def submitted_data(self) -> dict[str, object] | None:
-        return {} if self.is_submitted else None
-
-    @property
-    @override
-    def submitted(self) -> bool:
-        return self.is_submitted
-
-    @property
-    @override
-    def status(self) -> HumanInputFormStatus:
-        return HumanInputFormStatus.SUBMITTED if self.is_submitted else HumanInputFormStatus.WAITING
-
-    @property
-    @override
-    def expiration_time(self) -> datetime:
-        return datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1)
-
-
-class _TestFormRepository:
-    def __init__(self) -> None:
-        self.form: _TestForm | None = None
-        self.create_params: list[FormCreateParams] = []
-
-    def get_form(self, node_id: str, *, form_id: str | None = None) -> HumanInputFormEntity | None:
-        _ = node_id
-        if self.form is None or form_id != self.form.id:
-            return None
-        return self.form
-
-    def create_form(self, params: FormCreateParams) -> HumanInputFormEntity:
-        assert params.form_id is not None
-        self.create_params.append(params)
-        self.form = _TestForm(params.form_id)
-        return self.form
-
-    def mark_timeout(self, node_id: str, *, form_id: str) -> HumanInputFormEntity:
-        raise AssertionError(f"Unexpected timeout in container scenario: node_id={node_id}, form_id={form_id}")
-
-
 def _container_handler(
     *,
     inputs: dict[str, object] | None = None,
@@ -618,27 +541,6 @@ def test_workflow_tool_handler_runs_child_graph_with_internal_name_collision() -
         frame_registry["invocation:workflow-tool"]
     with pytest.raises(KeyError):
         runtime_state.get_container_frame("invocation:workflow-tool")
-
-
-def test_workflow_tool_handler_restores_child_frame() -> None:
-    handler, frame_registry, runtime_state, request, _ = _container_handler()
-    handler.handle_request(invocation_id="invocation", request=request)
-    frame_id = "invocation:workflow-tool"
-    original_frame = frame_registry[frame_id]
-    frame_state = runtime_state.get_container_frame(frame_id)
-    frame_registry.remove(frame_id)
-
-    handler.restore_frame(frame_state)
-
-    restored_frame = frame_registry[frame_id]
-    assert restored_frame is not original_frame
-    assert set(restored_frame.graph.nodes) == {"source-start", "source-end"}
-    answer = restored_frame.state.variable_pool.get(("source-start", "answer"))
-    assert answer is not None
-    assert answer.to_object() == "ok"
-    assert restored_frame.state.ready_queue is runtime_state.ready_queue
-    assert restored_frame.state.graph_execution is runtime_state.graph_execution
-    assert all(node.runtime_state is restored_frame.state for node in restored_frame.graph.nodes.values())
 
 
 def test_workflow_tool_handler_restores_child_failure() -> None:
@@ -980,7 +882,15 @@ def test_workflow_tool_human_input_pauses_and_resumes_without_duplicate_form(
     source_repository = MagicMock(spec=WorkflowToolSourceRepository)
     source_repository.get_source.return_value = _human_input_workflow_tool_source()
     handler_factory = partial(WorkflowToolContainerHandler, source_repository=source_repository)
-    form_repository = _TestFormRepository()
+    form_repository = MagicMock(spec=HumanInputFormRepository)
+    form_repository.get_form.return_value = None
+    form = MagicMock(spec=HumanInputFormEntity)
+
+    def create_form(params: FormCreateParams) -> HumanInputFormEntity:
+        form.id = params.form_id
+        return form
+
+    form_repository.create_form.side_effect = create_form
     human_input_app_ids: list[str] = []
 
     def build_human_input_callback(
@@ -1036,8 +946,8 @@ def test_workflow_tool_human_input_pauses_and_resumes_without_duplicate_form(
         not isinstance(event, NodeEvent) or event.node_id not in {"source-start", "source-human"}
         for event in initial_events
     )
-    assert len(form_repository.create_params) == 1
-    create_params = form_repository.create_params[0]
+    form_repository.create_form.assert_called_once()
+    create_params = form_repository.create_form.call_args.args[0]
     assert create_params.node_id == "source-human"
     assert create_params.workflow_execution_id == "outer-execution"
     child_frames = list(initial_state.container_frames())
@@ -1061,8 +971,12 @@ def test_workflow_tool_human_input_pauses_and_resumes_without_duplicate_form(
     restored_owner_factory._execution_driver = None
     restored_owner_factory._human_input_run_context = initial_owner_factory.human_input_run_context
     restored_graph.node_factory = restored_owner_factory
-    assert form_repository.form is not None
-    form_repository.form.is_submitted = True
+    form.status = HumanInputFormStatus.SUBMITTED
+    form.submitted = True
+    form.selected_action_id = "approve"
+    form.submitted_data = dict[str, object]()
+    form.rendered_content = "Approve this run?"
+    form_repository.get_form.side_effect = lambda _node_id, *, form_id: form if form_id == form.id else None
     resumed_events = list(
         Engine(
             graph=restored_graph,
@@ -1079,7 +993,7 @@ def test_workflow_tool_human_input_pauses_and_resumes_without_duplicate_form(
     )
     assert tool_succeeded.node_run_result.outputs["decision"] == "approve"
     assert json.loads(tool_succeeded.node_run_result.outputs["text"]) == {"decision": "approve"}
-    assert len(form_repository.create_params) == 1
+    form_repository.create_form.assert_called_once()
     assert human_input_app_ids == ["outer-app", "outer-app"]
     assert all(
         not isinstance(event, NodeEvent) or event.node_id not in {"source-human", "source-end"}

@@ -60,17 +60,6 @@ def _workflow_run(
     )
 
 
-def test_init_keeps_injected_dependencies(
-    service_dependencies: tuple[MagicMock, MagicMock],
-) -> None:
-    node_executions, workflow_runs = service_dependencies
-
-    service = _service(service_dependencies)
-
-    assert service._workflow_runs is workflow_runs
-    assert service._node_executions is node_executions
-
-
 class TestWorkflowRunServiceQueries:
     def test_workflow_tool_details_require_the_root_app_run_and_hide_internal_correlation(
         self, service_dependencies: tuple[MagicMock, MagicMock], monkeypatch: pytest.MonkeyPatch

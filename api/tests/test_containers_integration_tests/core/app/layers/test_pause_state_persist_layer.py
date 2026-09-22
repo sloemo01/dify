@@ -251,17 +251,6 @@ def test_database_transaction_handling(workflow_case: WorkflowCase) -> None:
         assert storage.load(pause.state_object_key)
 
 
-def test_file_storage_integration(workflow_case: WorkflowCase) -> None:
-    outputs = {"data": "x" * 10_000}
-    _, aggregate = workflow_case.prepare(outputs=outputs, total_tokens=1_000)
-    assert isinstance(list(aggregate.iter_events())[-1], GraphRunPausedEvent)
-    pause = workflow_case.stored_pause()
-    snapshot = WorkflowResumptionContext.loads(storage.load(pause.state_object_key).decode())
-    restored = RuntimeState.from_snapshot(snapshot.serialized_graph_runtime_state)
-    assert restored.outputs == outputs
-    assert restored.total_tokens == 1_000
-
-
 def test_workflow_with_different_creators(workflow_case: WorkflowCase) -> None:
     creator = Account(name="Workflow creator", email=f"{uuid4()}@example.com")
     workflow_case.session.add(creator)

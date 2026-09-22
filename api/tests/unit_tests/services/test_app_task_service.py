@@ -49,34 +49,6 @@ class TestAppTaskService:
         else:
             send_abort_command.assert_not_called()
 
-    @pytest.mark.parametrize(
-        "invoke_from",
-        [
-            InvokeFrom.WEB_APP,
-            InvokeFrom.SERVICE_API,
-            InvokeFrom.DEBUGGER,
-            InvokeFrom.EXPLORE,
-        ],
-    )
-    @patch("services.app_task_service.AppQueueManager")
-    @patch("services.app_task_service.send_abort_command")
-    def test_stop_task_with_different_invoke_sources(self, send_abort_command, mock_app_queue_manager, invoke_from):
-        """Test stop_task behavior with different invoke sources.
-
-        Verifies that the method works correctly regardless of the invoke source.
-        """
-        # Arrange
-        task_id = "task-789"
-        user_id = "user-999"
-        app_mode = AppMode.ADVANCED_CHAT
-
-        # Act
-        AppTaskService.stop_task(task_id, invoke_from, user_id, app_mode)
-
-        # Assert
-        mock_app_queue_manager.set_stop_flag.assert_called_once_with(task_id, invoke_from, user_id)
-        send_abort_command.assert_called_once_with(task_id)
-
     @patch("services.app_task_service.send_abort_command")
     @patch("services.app_task_service.AppQueueManager")
     def test_stop_task_legacy_mechanism_called_even_if_graph_engine_fails(

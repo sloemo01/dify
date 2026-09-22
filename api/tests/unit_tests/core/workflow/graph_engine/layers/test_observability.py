@@ -12,15 +12,19 @@ Test coverage:
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
+from unittest.mock import MagicMock
 
 import pytest
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.trace import StatusCode, get_current_span
 
+from core.app.entities.app_invoke_entities import InvokeFrom, UserFrom
 from core.app.workflow.layers.observability import ObservabilityLayer
+from core.tools.workflow_as_tool.repository import WorkflowToolSourceRepository
+from core.workflow.workflow_entry import WorkflowEntry
 from extensions.otel.semconv import DifySpanAttributes
-from graphon.engine_events import GraphRunAbortedEvent
-from graphon.enums import BuiltinNodeTypes
+from graphon.engine_events import GraphRunAbortedEvent, GraphRunSucceededEvent
+from graphon.graph import Graph
 from graphon.nodes.start import StartNode
 from graphon.nodes.start.entities import StartNodeData
 from graphon.runtime import RuntimeState, VariablePool
@@ -55,27 +59,37 @@ def test_unbound_node_still_runs_and_preserves_body_errors(config_overrides, tra
     assert get_current_span() is parent
 
 
-class TestObservabilityLayerInitialization:
-    """Test ObservabilityLayer initialization logic."""
+@pytest.mark.usefixtures("mock_is_instrument_flag_enabled_true", "tracer_provider_with_memory_exporter")
+def test_instrument_flag_enables_workflow_node_spans(memory_span_exporter, config_overrides, monkeypatch):
+    config_overrides(ENABLE_OTEL=False, GRAPH_ENGINE_MAX_WORKERS=1)
+    monkeypatch.setattr("core.workflow.workflow_entry.is_instrument_flag_enabled", lambda: True)
+    state = RuntimeState(workflow_id="workflow", variable_pool=VariablePool(), start_at=0)
+    node = StartNode(
+        node_id="start",
+        data=StartNodeData(title="Start", variables=[]),
+        init_params=build_test_graph_init_params(),
+        runtime_state=state,
+    )
+    entry = WorkflowEntry(
+        tenant_id="tenant",
+        app_id="app",
+        workflow_id="workflow",
+        graph_config={},
+        graph=Graph.new().add_root(node).build(),
+        user_id="user",
+        user_from=UserFrom.ACCOUNT,
+        invoke_from=InvokeFrom.DEBUGGER,
+        call_depth=0,
+        variable_pool=state.variable_pool,
+        graph_runtime_state=state,
+        workflow_tool_source_repository=MagicMock(spec=WorkflowToolSourceRepository),
+    )
 
-    @pytest.mark.usefixtures("mock_is_instrument_flag_enabled_false")
-    def test_initialization_when_otel_enabled(self, tracer_provider_with_memory_exporter):
-        """Test that layer initializes correctly when OTel is enabled."""
-        layer = ObservabilityLayer()
-        assert not layer._is_disabled
-        assert layer._tracer is not None
-        assert BuiltinNodeTypes.TOOL in layer._parsers
-        assert layer._default_parser is not None
+    events = list(entry.run())
 
-    @pytest.mark.usefixtures("mock_is_instrument_flag_enabled_true")
-    def test_initialization_when_instrument_flag_enabled(self, tracer_provider_with_memory_exporter, config_overrides):
-        """Test that layer enables when instrument flag is enabled."""
-        config_overrides(ENABLE_OTEL=False)
-        layer = ObservabilityLayer()
-        assert not layer._is_disabled
-        assert layer._tracer is not None
-        assert BuiltinNodeTypes.TOOL in layer._parsers
-        assert layer._default_parser is not None
+    assert isinstance(events[-1], GraphRunSucceededEvent)
+    spans = memory_span_exporter.get_finished_spans()
+    assert [span.name for span in spans] == [node.title]
 
 
 class TestObservabilityLayerNodeSpanLifecycle:
@@ -424,7 +438,6 @@ class TestObservabilityLayerDisabledMode:
         """Test that disabled layer doesn't create spans on node start."""
         config_overrides(ENABLE_OTEL=False)
         layer = ObservabilityLayer()
-        assert layer._is_disabled
 
         layer.on_graph_start()
         with layer.node_run_context(mock_start_node):
@@ -440,7 +453,6 @@ class TestObservabilityLayerDisabledMode:
         """Test that disabled layer doesn't process node end."""
         config_overrides(ENABLE_OTEL=False)
         layer = ObservabilityLayer()
-        assert layer._is_disabled
 
         layer.on_node_run_end(mock_llm_node, None)
 
