@@ -421,16 +421,7 @@ export const createWorkflowStreamHandlers = ({
 export {
   appendParallelNext,
   appendParallelStart,
-  appendResultText,
   applyWorkflowFinishedState,
-  applyWorkflowOutputs,
-  applyWorkflowPaused,
-  finishParallelTrace,
   finishWorkflowNode,
   markNodesStopped,
-  replaceResultText,
-  updateHumanInputFilled,
-  updateHumanInputRequired,
-  updateHumanInputTimeout,
-  upsertWorkflowNode,
 }
